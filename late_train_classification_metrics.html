@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Late train or on time? Classification metrics, visually</title>
+<style>
+:root{--bg:#f4f7fb;--card:#fff;--ink:#15233b;--mut:#5b6b82;--line:#d5dded;--tp:#1e8e5a;--fp:#d99a00;--fn:#c8382e;--tn:#5a7ba6;--acc:#0f3d6b;--hd:#0f3d6b;--code:#10213a}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1726;--card:#16233a;--ink:#e7eefb;--mut:#9fb0c9;--line:#2a3b58;--tp:#3fc088;--fp:#f0b429;--fn:#ee6a5f;--tn:#7fa3d1;--acc:#8ab8f0;--hd:#0a2744;--code:#0a1424}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 "Avenir Next","Segoe UI",system-ui,sans-serif}
+.wrap{max-width:900px;margin:0 auto;padding:0 20px}
+header{background:var(--hd);color:#fff;padding:36px 0 30px}
+h1{font-size:clamp(1.9rem,5vw,2.8rem);line-height:1.1;margin:0 0 10px}
+.sub{max-width:62ch;margin:0;opacity:.9}
+.bar{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line)}
+.row{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;padding:10px 20px}
+.row input{flex:1 1 180px;min-width:150px;accent-color:var(--acc)}
+button{font:inherit;font-size:.85rem;padding:5px 11px;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;cursor:pointer}
+button:hover{border-color:var(--acc)}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+section{padding:26px 0;border-bottom:1px solid var(--line)}
+h2{font-size:1.4rem;margin:0 0 6px}
+p{max-width:68ch;margin:.4em 0 .9em}
+.tp{--k:var(--tp)}.fp{--k:var(--fp)}.fn{--k:var(--fn)}.tn{--k:var(--tn)}
+.cm{display:grid;grid-template-columns:6.5rem 1fr 1fr;gap:8px;max-width:560px}
+.cm i{font-style:normal;color:var(--mut);font-size:.85rem;align-self:center}
+.c{border-radius:8px;padding:10px 12px;border-left:6px solid var(--k);background:color-mix(in srgb,var(--k) 14%,var(--card))}
+.c b{font-size:2rem;display:block;line-height:1.1}.c span{font-weight:600;font-size:.9rem;display:block}.c small{color:var(--mut)}
+.d{display:inline-block;width:12px;height:12px;margin:1px;border-radius:2px;background:var(--k)}
+#dots{margin:14px 0 6px;max-width:560px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+.f{font-size:.92rem;color:var(--mut)}.big{font-size:1.9rem;font-weight:700;line-height:1.2}
+.br{display:grid;grid-template-columns:minmax(6rem,10rem) 1fr 3.4rem;gap:8px;align-items:center;margin:5px 0;font-size:.9rem}
+.tr{position:relative;height:14px;background:var(--line);border-radius:7px;overflow:hidden}
+.tr div{height:100%}.tr u{position:absolute;top:0;bottom:0;width:2px;background:var(--ink)}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:16px}
+svg{width:100%;height:auto;display:block}
+.tw{overflow-x:auto}table{border-collapse:collapse;font-size:.9rem}td,th{padding:4px 12px;border-bottom:1px solid var(--line);text-align:right}th{color:var(--mut);font-weight:600}
+pre{background:var(--code);color:#dbe8ff;padding:14px;border-radius:8px;overflow:auto;font:13px/1.5 Consolas,Menlo,monospace;max-height:520px}
+pre i{font-style:normal}.cc{color:#7f93b2}.st{color:#a5e3b0}.kw{color:#f2a76b}
+.cell{margin:14px 0}.ch{display:flex;justify-content:space-between;align-items:center;background:#1b2f4f;color:#dbe8ff;padding:6px 10px;border-radius:8px 8px 0 0;font-size:.85rem}.cell pre{margin:0;border-radius:0 0 8px 8px}a{color:var(--acc)}
+</style></head><body>
+<header><div class="wrap"><h1>Late train or on time?</h1>
+<p class="sub">You are the station announcer. A model gives every train a late-risk score, and you decide when to sound the alarm. Drag the threshold bar below and watch every metric, chart and count react.</p></div></header>
+<div class="bar"><div class="row"><label for="t"><b>Alarm threshold</b></label><input id="t" type="range" min="0.01" max="0.99" step="0.01" value="0.5"><b id="tv"></b>
+<span><button data-t="0.2">Cautious</button> <button data-t="0.5">Balanced</button> <button data-t="0.8">Strict</button> <button id="best"></button></span></div></div>
+<main class="wrap">
+
+<section><h2>The data and the model</h2><p id="setup"></p><p>Download <a href="train_journeys.csv" download>train_journeys.csv</a> and keep it beside your Python file. The code cells that follow are meant to be run in order; setup steps are at the bottom of the page.</p><div class="tw" id="tbl"></div><div class="cell"><div class="ch"><span>Cell 1: Load the data</span><button data-c="0">Copy</button></div><pre class="py"># %% Cell 1: Load the data
+import pandas as pd, numpy as np, matplotlib.pyplot as plt
+
+df = pd.read_csv("train_journeys.csv")      # keep the CSV next to this .py file
+print(df.shape)
+print(df.head())
+print("Late rate:", round(df["late"].mean(), 3))</pre></div><div class="cell"><div class="ch"><span>Cell 2: Split, scale and train</span><button data-c="1">Copy</button></div><pre class="py"># %% Cell 2: Split, scale and train
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+
+X = df.drop(columns="late")
+y = df["late"]
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, stratify=y, random_state=42)
+
+scaler = StandardScaler().fit(X_tr)
+model = LogisticRegression().fit(scaler.transform(X_tr), y_tr)
+proba = model.predict_proba(scaler.transform(X_te))[:, 1]   # late-risk score, 0 to 1
+print(proba[:5].round(3))</pre></div></section>
+
+<section><h2>Confusion matrix: four possible outcomes</h2>
+<p>Every train ends up in exactly one box. Rows are what really happened, columns are what the announcer said. Each square below is one of the unseen test trains.</p>
+<div class="cm" id="cm"></div><div id="dots"></div>
+<div class="f"><span class="d tp"></span>TP <span class="d fn"></span>FN <span class="d fp"></span>FP <span class="d tn"></span>TN</div>
+<p id="cmn"></p><div class="cell"><div class="ch"><span>Cell 3: Confusion matrix</span><button data-c="2">Copy</button></div><pre class="py"># %% Cell 3: Confusion matrix at a threshold
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
+THRESH = 0.5                                  # change me, then re-run cells 3 onward
+pred = (proba &gt;= THRESH).astype(int)
+tn, fp, fn, tp = confusion_matrix(y_te, pred).ravel()
+print(f"TP={tp}  FN={fn}  FP={fp}  TN={tn}")
+
+ConfusionMatrixDisplay.from_predictions(y_te, pred, display_labels=["on time", "late"], cmap="Blues")
+plt.title(f"Confusion matrix at threshold {THRESH}")
+plt.show()</pre></div></section>
+
+<section><h2>Accuracy and why it can fool you</h2>
+<p>Accuracy asks: out of all trains, how many did we get right, in either direction?</p><div id="acc"></div><div class="cell"><div class="ch"><span>Cell 4: Accuracy and the lazy baseline</span><button data-c="3">Copy</button></div><pre class="py"># %% Cell 4: Accuracy and the lazy baseline
+from sklearn.metrics import accuracy_score
+
+accuracy = (tp + tn) / (tp + tn + fp + fn)
+lazy_accuracy = (y_te == 0).mean()            # a model that never warns anyone
+print("Accuracy by hand:", round(accuracy, 3), "| sklearn:", round(accuracy_score(y_te, pred), 3))
+print("Lazy model accuracy:", round(lazy_accuracy, 3), "(and it catches 0 late trains)")</pre></div></section>
+
+<section><h2>Precision and recall: two different questions</h2><div id="pr"></div><div class="cell"><div class="ch"><span>Cell 5: Precision and recall</span><button data-c="4">Copy</button></div><pre class="py"># %% Cell 5: Precision and recall
+from sklearn.metrics import precision_score, recall_score
+
+precision = tp / (tp + fp) if (tp + fp) else 1.0
+recall = tp / (tp + fn)
+print("Precision by hand:", round(precision, 3), "| sklearn:", round(precision_score(y_te, pred), 3))
+print("Recall by hand:   ", round(recall, 3), "| sklearn:", round(recall_score(y_te, pred), 3))</pre></div></section>
+
+<section><h2>F1 score: one number for both</h2><div id="f1"></div><div class="cell"><div class="ch"><span>Cell 6: F1 score</span><button data-c="5">Copy</button></div><pre class="py"># %% Cell 6: F1 score
+from sklearn.metrics import f1_score, classification_report
+
+f1 = 2 * precision * recall / (precision + recall)
+print("F1 by hand:", round(f1, 3), "| sklearn:", round(f1_score(y_te, pred), 3))
+print("Plain average of precision and recall:", round((precision + recall) / 2, 3))
+print(classification_report(y_te, pred, target_names=["on time", "late"]))</pre></div></section>
+
+<section><h2>The threshold is a trade-off</h2>
+<p id="tn"></p>
+<div class="two"><div><div class="f"><span style="color:var(--fp)">● Precision</span> <span style="color:var(--fn)">● Recall</span> <span style="color:var(--acc)">● F1</span></div><div id="tc"></div></div>
+<div><div class="f"><span style="color:var(--fn)">● Late trains</span> <span style="color:var(--tn)">● On-time trains</span>: share of each group at each risk score</div><div id="hs"></div></div></div>
+<p>Right of the black line, the announcer warns. Raising the threshold removes false alarms (precision rises) but lets more late trains slip past (recall falls).</p><div class="cell"><div class="ch"><span>Cell 7: Sweep the threshold</span><button data-c="6">Copy</button></div><pre class="py"># %% Cell 7: Sweep the threshold
+ts = np.linspace(0.01, 0.99, 99)
+prec_list, rec_list, f1_list = [], [], []
+for t in ts:
+    p = (proba &gt;= t).astype(int)
+    prec_list.append(precision_score(y_te, p, zero_division=1))
+    rec_list.append(recall_score(y_te, p))
+    f1_list.append(f1_score(y_te, p, zero_division=0))
+
+plt.plot(ts, prec_list, label="Precision")
+plt.plot(ts, rec_list, label="Recall")
+plt.plot(ts, f1_list, label="F1")
+plt.axvline(THRESH, color="black")
+plt.xlabel("Threshold"); plt.ylabel("Score"); plt.legend()
+plt.show()
+print("Best F1 threshold:", round(ts[int(np.argmax(f1_list))], 2))</pre></div></section>
+
+<section><h2>ROC curve and AUC: judging the model at every threshold</h2>
+<p>Each point on the ROC curve is the model at one threshold: how many late trains it catches (recall) against how many on-time trains it wrongly warns about (false alarm rate). The red dot is your current threshold.</p>
+<div class="two"><div><div id="roc"></div></div><div><div id="prc"></div></div></div>
+<div class="card"><div class="f">AUC-ROC = area under the blue curve</div><div class="big" id="auc"></div><div class="f" id="aucn"></div></div>
+<p>0.5 is a coin flip (dashed diagonal), 1.0 is perfect. On the right is the precision-recall curve, which is more honest when late trains are rare: its dashed baseline is the late rate.</p><div class="cell"><div class="ch"><span>Cell 8: ROC curve and AUC</span><button data-c="7">Copy</button></div><pre class="py"># %% Cell 8: ROC curve and AUC
+from sklearn.metrics import roc_curve, roc_auc_score
+
+fpr, tpr, _ = roc_curve(y_te, proba)
+auc = roc_auc_score(y_te, proba)
+plt.plot(fpr, tpr, label=f"Model (AUC = {auc:.2f})")
+plt.plot([0, 1], [0, 1], "--", label="Coin flip")
+plt.xlabel("False alarm rate"); plt.ylabel("Recall"); plt.legend()
+plt.show()</pre></div><div class="cell"><div class="ch"><span>Cell 9: Precision-recall curve</span><button data-c="8">Copy</button></div><pre class="py"># %% Cell 9: Precision-recall curve
+from sklearn.metrics import precision_recall_curve, average_precision_score
+
+prec, rec, _ = precision_recall_curve(y_te, proba)
+plt.plot(rec, prec)
+plt.axhline(y_te.mean(), ls="--")             # dashed line = late rate
+plt.xlabel("Recall"); plt.ylabel("Precision")
+plt.show()
+print("Average precision:", round(average_precision_score(y_te, proba), 3))</pre></div></section>
+
+<section><h2>Run it yourself in VS Code</h2><p>Put <a href="train_journeys.csv" download>train_journeys.csv</a> and your Python file in one folder, then run <code>pip install pandas numpy scikit-learn matplotlib</code>. Every cell starts with <code># %%</code>, which the VS Code Python and Jupyter extensions turn into a “Run Cell” button. Run cells in order, because later ones reuse earlier variables.</p><p><button id="dl">Download all cells as .py</button></p></section>
+</main>
+<script>
+const $=id=>document.getElementById(id),pct=v=>(v*100).toFixed(1)+'%',f2=v=>v.toFixed(2);
+const P=[0.474083, 0.757768, 0.197466, 0.290798, 0.883059, 0.532907, 0.177435, 0.081064, 0.621145, 0.127063, 0.109421, 0.379437, 0.274734, 0.292642, 0.840015, 0.354675, 0.038825, 0.2026, 0.258425, 0.11921, 0.148147, 0.01416, 0.217932, 0.822213, 0.023036, 0.231046, 0.475878, 0.168535, 0.53178, 0.07915, 0.027097, 0.498564, 0.023013, 0.37655, 0.393738, 0.2887, 0.678909, 0.029087, 0.498309, 0.085984, 0.076692, 0.707975, 0.506589, 0.020355, 0.4018, 0.175691, 0.118779, 0.036859, 0.066719, 0.234668, 0.186829, 0.014464, 0.142383, 0.155836, 0.32609, 0.164463, 0.201611, 0.140518, 0.58739, 0.012736, 0.403025, 0.039874, 0.378787, 0.09224, 0.049661, 0.528479, 0.237044, 0.423327, 0.099036, 0.960599, 0.022634, 0.211977, 0.299141, 0.071674, 0.028047, 0.130216, 0.038044, 0.564787, 0.441868, 0.100814, 0.116262, 0.156753, 0.131073, 0.497499, 0.062379, 0.200091, 0.3383, 0.187281, 0.119864, 0.386605, 0.0107, 0.008981, 0.105311, 0.407122, 0.064836, 0.083017, 0.340229, 0.203268, 0.168783, 0.499461, 0.085615, 0.309988, 0.030528, 0.192097, 0.415123, 0.294738, 0.053328, 0.551838, 0.221111, 0.031795, 0.02349, 0.931407, 0.855027, 0.012568, 0.039819, 0.406175, 0.262268, 0.061585, 0.065819, 0.589244, 0.321622, 0.181353, 0.611952, 0.062607, 0.205155, 0.159694, 0.056448, 0.547307, 0.005504, 0.399511, 0.198031, 0.321498, 0.710971, 0.065209, 0.111392, 0.119165, 0.167269, 0.493583, 0.180637, 0.117401, 0.229424, 0.046741, 0.347881, 0.601466, 0.0449, 0.386119, 0.255663, 0.482383, 0.070173, 0.262546, 0.105833, 0.387492, 0.0223, 0.785652, 0.911412, 0.724251, 0.614609, 0.077796, 0.444273, 0.05198, 0.144014, 0.158932, 0.104506, 0.318205, 0.577898, 0.084573, 0.056514, 0.065398, 0.58311, 0.080111, 0.133829, 0.03581, 0.088799, 0.483894, 0.458474, 0.792622, 0.041014, 0.009907, 0.679453, 0.101701, 0.10277, 0.215537, 0.023656, 0.055305, 0.008343, 0.174252, 0.049021, 0.028776, 0.49272, 0.224819, 0.457649, 0.20143, 0.897305, 0.042053, 0.670395, 0.646632, 0.038123, 0.417847, 0.613286, 0.147181, 0.945353, 0.71614, 0.12734, 0.009729, 0.031816, 0.341169, 0.276509, 0.596221, 0.469761, 0.072907, 0.747095, 0.014448, 0.177648, 0.696045, 0.411009, 0.599009, 0.019985, 0.622424, 0.268564, 0.24779, 0.732816, 0.611574, 0.077115, 0.040449, 0.365078, 0.316793, 0.156702, 0.118339, 0.040317, 0.529232, 0.083372, 0.254557, 0.233469, 0.57255, 0.430832, 0.581094, 0.241125, 0.843258, 0.100712, 0.509784, 0.427061, 0.217433, 0.266694, 0.233113, 0.124835, 0.836642, 0.080499, 0.156263, 0.102571, 0.221365, 0.519645, 0.653217, 0.051829, 0.172133, 0.326895, 0.30221, 0.298628, 0.116635, 0.08662, 0.389553, 0.64521, 0.006751, 0.069656, 0.215472, 0.020382, 0.120215, 0.096641, 0.081823, 0.173489, 0.170314, 0.463565, 0.088448, 0.419224, 0.186534, 0.197066, 0.298573, 0.282943, 0.116355, 0.216928, 0.377061, 0.575706, 0.560484, 0.764559, 0.635694, 0.026097, 0.203913, 0.006504, 0.040818, 0.035013, 0.134612, 0.030445, 0.021107, 0.071342, 0.502859, 0.413501, 0.0362, 0.213212, 0.146218, 0.016325, 0.244938],L=[1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],n=P.length,pos=L.reduce((a,v)=>a+v,0),RATE=0.273,HEAD=[[7.7, 0.6, 3.0, 1.0, 0.0], [4.4, 4.6, 2.0, 0.0, 1.0], [8.6, 1.3, 4.0, 1.0, 0.0], [7.0, 1.5, 4.0, 1.0, 0.0], [0.9, 6.3, 6.0, 1.0, 0.0]];
+function met(t){let tp=0,fp=0,fn=0,tn=0;P.forEach((p,i)=>{const h=p>=t;if(h&&L[i])tp++;else if(h)fp++;else if(L[i])fn++;else tn++});
+const pr=tp+fp?tp/(tp+fp):1,rc=tp/(tp+fn);return{tp,fp,fn,tn,acc:(tp+tn)/n,pr,rc,f1:pr+rc?2*pr*rc/(pr+rc):0,fpr:fp/(fp+tn)}}
+const S=Array.from({length:201},(_,i)=>i/200),M=S.map(met),ROC=M.slice().reverse().map(m=>[m.fpr,m.rc]);
+let auc=0;for(let i=1;i<ROC.length;i++)auc+=(ROC[i][0]-ROC[i-1][0])*(ROC[i][1]+ROC[i-1][1])/2;
+const A=P.filter((_,i)=>L[i]),B=P.filter((_,i)=>!L[i]);let wins=0;A.forEach(a=>B.forEach(c=>wins+=a>c?1:a==c?.5:0));
+let bi=2;M.forEach((m,i)=>{if(i%2==0&&i>=2&&i<=198&&m.f1>M[bi].f1)bi=i});const best=S[bi];
+const card=(f,nm,v)=>`<div class="card"><div class="f">${f}</div><div class="f">${nm}</div><div class="big">${v}</div></div>`;
+const bar=(l,v,c,mk)=>`<div class="br"><span>${l}</span><div class="tr"><div style="width:${v*100}%;background:${c}"></div>${mk!=null?`<u style="left:${mk*100}%"></u>`:''}</div><b>${pct(v)}</b></div>`;
+function plot(id,ser,o){const W=330,H=260,m=40,X=v=>m+v*(W-m-12),Y=v=>H-m-v*(H-m-12),pt=p=>p.map(q=>X(q[0])+','+Y(q[1])).join(' ');
+let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${o.al}">`;
+for(let k=0;k<=4;k++){const v=k/4;s+=`<path d="M${m} ${Y(v)}H${W-12}" stroke="var(--line)"/><text x="${m-6}" y="${Y(v)+4}" text-anchor="end" font-size="10" fill="var(--mut)">${v}</text><text x="${X(v)}" y="${H-m+14}" text-anchor="middle" font-size="10" fill="var(--mut)">${v}</text>`}
+s+=`<text x="${(W+m)/2}" y="${H-6}" text-anchor="middle" font-size="11" fill="var(--mut)">${o.x}</text><text transform="translate(11 ${H/2-6}) rotate(-90)" text-anchor="middle" font-size="11" fill="var(--mut)">${o.y}</text>`;
+if(o.diag)s+=`<path d="M${X(0)} ${Y(0)}L${X(1)} ${Y(1)}" stroke="var(--mut)" stroke-dasharray="4 4"/>`;
+if(o.hl!=null)s+=`<path d="M${X(0)} ${Y(o.hl)}H${X(1)}" stroke="var(--mut)" stroke-dasharray="4 4"/>`;
+if(o.vl!=null)s+=`<path d="M${X(o.vl)} ${Y(0)}V${Y(1)}" stroke="var(--ink)" stroke-width="1.5"/>`;
+if(o.area)s+=`<polygon fill="var(--acc)" opacity=".15" points="${X(0)},${Y(0)} ${pt(ser[0].p)} ${X(1)},${Y(0)}"/>`;
+ser.forEach(e=>s+=`<polyline fill="none" stroke="${e.c}" stroke-width="2.5" points="${pt(e.p)}"/>`);
+(o.dots||[]).forEach(d=>s+=`<circle cx="${X(d[0])}" cy="${Y(d[1])}" r="6" fill="${d[2]}" stroke="var(--card)" stroke-width="2"/>`);
+$(id).innerHTML=s+'</svg>'}
+function hist(t){const K=20,a=Array(K).fill(0),c=Array(K).fill(0);P.forEach((p,i)=>(L[i]?a:c)[Math.min(K-1,p*K|0)]++);
+const mx=Math.max(...a.map(v=>v/pos),...c.map(v=>v/(n-pos))),W=330,H=210,m=28,bw=(W-m-10)/K,h0=H-m,sc=(H-m-14)/mx,tx=m+t*(W-m-10);
+const rc=(arr,k,col,o)=>arr.map((v,i)=>{const h=v/k*sc;return`<rect x="${m+i*bw+o}" y="${h0-h}" width="${bw/2-.5}" height="${h}" fill="${col}"/>`}).join('');
+$('hs').innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Risk scores of late and on-time trains">${rc(c,n-pos,'var(--tn)',0)}${rc(a,pos,'var(--fn)',bw/2)}<path d="M${m} ${h0}H${W-10}" stroke="var(--mut)"/><path d="M${tx} 8V${h0}" stroke="var(--ink)" stroke-width="1.5"/>`+[0,.5,1].map(v=>`<text x="${m+v*(W-m-10)}" y="${h0+14}" text-anchor="middle" font-size="10" fill="var(--mut)">${v}</text>`).join('')+`<text x="${(W+m)/2}" y="${H-5}" text-anchor="middle" font-size="11" fill="var(--mut)">Risk score from the model</text></svg>`}
+function render(){const t=+$('t').value,m=met(t),lazy=(n-pos)/n,av=(m.pr+m.rc)/2,cell=(k,v,h,s)=>`<div class="c ${k}"><b>${v}</b><span>${h}</span><small>${s}</small></div>`;
+$('tv').textContent='warn if risk ≥ '+f2(t);
+$('cm').innerHTML=`<i></i><i>Warned: late</i><i>Silent</i><i>Actually late</i>`+cell('tp',m.tp,'True positive','Warned, and it was late')+cell('fn',m.fn,'False negative','Silent, but it was late')+`<i>Actually on time</i>`+cell('fp',m.fp,'False positive','Warned, but it ran on time')+cell('tn',m.tn,'True negative','Silent, and it was on time');
+$('dots').innerHTML=[['tp',m.tp],['fn',m.fn],['fp',m.fp],['tn',m.tn]].map(([k,v])=>`<span class="d ${k}"></span>`.repeat(v)).join('');
+$('cmn').innerHTML=`The announcer warned about <b>${m.tp+m.fp}</b> trains. Of the ${pos} trains that really ran late, <b>${m.fn}</b> slipped through with no warning.`;
+$('acc').innerHTML=card('Accuracy = (TP + TN) ÷ all trains',`(${m.tp} + ${m.tn}) ÷ ${n}`,pct(m.acc))+bar('Your model',m.acc,'var(--acc)')+bar('Lazy model that never warns',lazy,'var(--mut)')+`<p><b>Myth: high accuracy means a good model.</b> The lazy model never warns anyone, catches 0 late trains, and still scores ${pct(lazy)} because most trains are on time. When one class is rare, accuracy hides what you care about.</p>`;
+$('pr').innerHTML=`<div class="two"><div>${card('Precision = TP ÷ (TP + FP)',`${m.tp} ÷ (${m.tp} + ${m.fp})`,pct(m.pr))}${bar('Alarms that were right',m.pr,'var(--fp)')}<p>When the announcer says “LATE”, how often is it true? Low precision is the boy who cried wolf: passengers start ignoring alarms.</p></div><div>${card('Recall = TP ÷ (TP + FN)',`${m.tp} ÷ (${m.tp} + ${m.fn})`,pct(m.rc))}${bar('Late trains caught',m.rc,'var(--fn)')}<p>Of all trains that were really late, how many did we warn about? Low recall means passengers are stranded with no warning.</p></div></div>`;
+$('f1').innerHTML=card('F1 = 2 × Precision × Recall ÷ (Precision + Recall)',`2 × ${f2(m.pr)} × ${f2(m.rc)} ÷ (${f2(m.pr)} + ${f2(m.rc)})`,f2(m.f1))+bar('Precision',m.pr,'var(--fp)')+bar('Recall',m.rc,'var(--fn)')+bar('F1',m.f1,'var(--acc)',av)+`<p>The black tick is the plain average (${f2(av)}). F1 is a harmonic mean, so it sits at or below that tick and is pulled toward the weaker score. A great precision cannot hide a terrible recall.</p>`;
+$('tn').textContent=t<.3?'Cautious: nearly every late train is caught, but you pay with many false alarms.':t>.7?'Strict: alarms are almost always right, but many late trains slip through.':'Balanced: a compromise between false alarms and missed late trains.';
+plot('tc',[{p:S.map((s,i)=>[s,M[i].pr]),c:'var(--fp)'},{p:S.map((s,i)=>[s,M[i].rc]),c:'var(--fn)'},{p:S.map((s,i)=>[s,M[i].f1]),c:'var(--acc)'}],{x:'Threshold',y:'Score',vl:t,al:'Precision, recall and F1 across thresholds',dots:[[t,m.pr,'var(--fp)'],[t,m.rc,'var(--fn)'],[t,m.f1,'var(--acc)']]});
+hist(t);
+plot('roc',[{p:ROC,c:'var(--acc)'}],{x:'False alarm rate',y:'Recall',diag:1,area:1,al:'ROC curve',dots:[[m.fpr,m.rc,'var(--fn)']]});
+plot('prc',[{p:M.map(q=>[q.rc,q.pr]),c:'var(--tp)'}],{x:'Recall',y:'Precision',hl:pos/n,al:'Precision-recall curve',dots:[[m.rc,m.pr,'var(--fn)']]});
+}
+$('setup').innerHTML=`<b>train_journeys.csv</b> holds 1,000 simulated train journeys with four clues each; ${pct(RATE)} ran more than 30 minutes late. A logistic regression learns from 700 trains and is judged on 300 unseen ones (${pos} late, ${n-pos} on time). Every number on this page comes from that Python model, so your VS Code run will match.`;
+$('tbl').innerHTML='<table><tr><th>fog (0-10)</th><th>congestion (0-10)</th><th>previous delay (min)</th><th>peak hour</th><th>late?</th></tr>'+HEAD.map(o=>`<tr><td>${o[0]}</td><td>${o[1]}</td><td>${o[2]}</td><td>${o[3]}</td><td>${o[4]?'yes':'no'}</td></tr>`).join('')+'</table>';
+$('auc').textContent=f2(auc);
+$('aucn').textContent=`Meaning: pick one random late train and one random on-time train. The model gives the late one a higher risk score in ${pct(wins/(A.length*B.length))} of such pairs.`;
+$('best').textContent='Best F1 ('+f2(best)+')';$('best').onclick=()=>{$('t').value=best;render()};
+document.querySelectorAll('[data-t]').forEach(x=>x.onclick=()=>{$('t').value=x.dataset.t;render()});
+$('t').oninput=render;
+const cs=[...document.querySelectorAll('pre.py')],raw=cs.map(c=>c.textContent);
+cs.forEach(c=>c.innerHTML=c.textContent.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/(#.*)|("[^"\n]*")|\b(import|from|as|if|else|for|in)\b/g,(m,c,s,k)=>c?`<i class="cc">${c}</i>`:s?`<i class="st">${s}</i>`:`<i class="kw">${k}</i>`));
+document.querySelectorAll('[data-c]').forEach(x=>x.onclick=()=>navigator.clipboard.writeText(raw[x.dataset.c]).then(()=>{x.textContent='Copied';setTimeout(()=>x.textContent='Copy',1500)}));
+$('dl').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([raw.join('\n\n')],{type:'text/plain'}));a.download='train_late_metrics.py';a.click()};
+render();
+</script></body></html>
